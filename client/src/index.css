@@ -1,0 +1,125 @@
+:root {
+  --gold: #c89b3c;
+  --gold-soft: #f0e0bd;
+  --ink: #1c1a17;
+  --ink-soft: #57514a;
+  --paper: #fffdf8;
+  --line: #e8e0d0;
+
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 56px 24px 80px;
+}
+
+.hero {
+  border-left: 4px solid var(--gold);
+  padding-left: 20px;
+  margin-bottom: 44px;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: clamp(30px, 6vw, 44px);
+  line-height: 1.1;
+}
+
+.tagline {
+  margin: 0;
+  font-size: 17px;
+  color: var(--ink-soft);
+}
+
+.card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 26px 26px 30px;
+}
+
+.card h2 {
+  margin: 0 0 8px;
+  font-size: 19px;
+}
+
+.muted {
+  margin: 0 0 22px;
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
+
+.checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+
+.checks li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 15px;
+}
+
+.checks li span:first-child::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 10px;
+  border-radius: 50%;
+  background: var(--line);
+  vertical-align: middle;
+}
+
+.checks li.ok span:first-child::before {
+  background: #2e9e6b;
+}
+
+.checks li.bad span:first-child::before {
+  background: #d68b12;
+}
+
+.checks li span:last-child {
+  color: var(--ink-soft);
+  text-align: right;
+}
+
+.hint {
+  margin: 20px 0 0;
+  padding: 14px 16px;
+  background: var(--gold-soft);
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+code {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 13px;
+}
