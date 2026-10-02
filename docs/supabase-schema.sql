@@ -184,7 +184,206 @@ create index if not exists order_items_order_id_idx on public.order_items (order
 
 
 -- -------------------------------------------------------------
---  6. Keep updated_at honest
+--  6. SAVE AN ORDER SAFELY
+--     Called only by the server. Prices and delivery fees are
+--     read from the database and the whole order saves together.
+-- -------------------------------------------------------------
+create or replace function public.create_order_for_user(
+  p_user_id uuid,
+  p_customer_name text,
+  p_customer_email text,
+  p_customer_phone text,
+  p_fulfilment text,
+  p_delivery_zone_id uuid,
+  p_delivery_address text,
+  p_delivery_note text,
+  p_payment_method text,
+  p_items jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_order_id uuid := gen_random_uuid();
+  v_order_number text := 'AGE-' || to_char(clock_timestamp(), 'YYYYMMDD') || '-' ||
+    upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 8));
+  v_subtotal numeric(12, 2) := 0;
+  v_delivery_fee numeric(12, 2) := 0;
+  v_fee_confirmed boolean := true;
+  v_zone_name text;
+  v_item record;
+  v_product record;
+begin
+  if p_user_id is null or not exists (
+    select 1 from public.profiles where id = p_user_id
+  ) then
+    raise exception 'A valid customer account is required';
+  end if;
+
+  if nullif(trim(p_customer_name), '') is null
+     or nullif(trim(p_customer_email), '') is null
+     or nullif(trim(p_customer_phone), '') is null then
+    raise exception 'Customer name, email and phone are required';
+  end if;
+
+  if p_fulfilment not in ('delivery', 'pickup') then
+    raise exception 'Invalid fulfilment option';
+  end if;
+
+  if p_payment_method not in ('card', 'transfer', 'pay_on_delivery') then
+    raise exception 'Invalid payment method';
+  end if;
+
+  if jsonb_typeof(p_items) is distinct from 'array'
+     or jsonb_array_length(p_items) = 0
+     or jsonb_array_length(p_items) > 100 then
+    raise exception 'An order must contain between 1 and 100 items';
+  end if;
+
+  if p_fulfilment = 'delivery' then
+    if p_delivery_zone_id is null then
+      raise exception 'A delivery area is required';
+    end if;
+
+    select dz.name, dz.fee, not dz.needs_quote
+    into v_zone_name, v_delivery_fee, v_fee_confirmed
+    from public.delivery_zones dz
+    where dz.id = p_delivery_zone_id and dz.is_active = true;
+
+    if not found then
+      raise exception 'The selected delivery area is not available';
+    end if;
+
+    if nullif(trim(p_delivery_address), '') is null then
+      raise exception 'A delivery address is required';
+    end if;
+
+    if not v_fee_confirmed then
+      v_delivery_fee := 0;
+    end if;
+  else
+    p_delivery_zone_id := null;
+    p_delivery_address := null;
+    v_zone_name := null;
+  end if;
+
+  insert into public.orders (
+    id,
+    order_number,
+    user_id,
+    customer_name,
+    customer_email,
+    customer_phone,
+    fulfilment,
+    delivery_zone_id,
+    delivery_zone_name,
+    delivery_address,
+    delivery_note,
+    delivery_fee,
+    fee_confirmed,
+    subtotal,
+    total,
+    payment_method,
+    payment_status,
+    status
+  ) values (
+    v_order_id,
+    v_order_number,
+    p_user_id,
+    trim(p_customer_name),
+    lower(trim(p_customer_email)),
+    trim(p_customer_phone),
+    p_fulfilment,
+    p_delivery_zone_id,
+    v_zone_name,
+    nullif(trim(p_delivery_address), ''),
+    nullif(trim(p_delivery_note), ''),
+    v_delivery_fee,
+    v_fee_confirmed,
+    0,
+    v_delivery_fee,
+    p_payment_method,
+    'pending',
+    'pending'
+  );
+
+  for v_item in
+    select
+      (entry ->> 'product_id')::uuid as product_id,
+      sum((entry ->> 'quantity')::integer)::integer as quantity
+    from jsonb_array_elements(p_items) as entry
+    group by (entry ->> 'product_id')::uuid
+  loop
+    if v_item.quantity < 1 then
+      raise exception 'Every quantity must be at least one';
+    end if;
+
+    select p.id, p.name, p.unit, p.price, p.stock
+    into v_product
+    from public.products p
+    where p.id = v_item.product_id and p.is_active = true;
+
+    if not found then
+      raise exception 'A product is no longer available';
+    end if;
+
+    if v_item.quantity > v_product.stock then
+      raise exception 'The requested quantity is no longer available';
+    end if;
+
+    insert into public.order_items (
+      order_id,
+      product_id,
+      product_name,
+      unit,
+      unit_price,
+      quantity,
+      line_total
+    ) values (
+      v_order_id,
+      v_product.id,
+      v_product.name,
+      v_product.unit,
+      v_product.price,
+      v_item.quantity,
+      v_product.price * v_item.quantity
+    );
+
+    v_subtotal := v_subtotal + (v_product.price * v_item.quantity);
+  end loop;
+
+  update public.orders o
+  set subtotal = v_subtotal,
+      total = v_subtotal + v_delivery_fee
+  where o.id = v_order_id;
+
+  return jsonb_build_object(
+    'id', v_order_id,
+    'order_number', v_order_number,
+    'subtotal', v_subtotal,
+    'delivery_fee', v_delivery_fee,
+    'total', v_subtotal + v_delivery_fee,
+    'fee_confirmed', v_fee_confirmed,
+    'payment_method', p_payment_method,
+    'payment_status', 'pending',
+    'status', 'pending'
+  );
+end;
+$$;
+
+revoke all on function public.create_order_for_user(
+  uuid, text, text, text, text, uuid, text, text, text, jsonb
+) from public, anon, authenticated;
+
+grant execute on function public.create_order_for_user(
+  uuid, text, text, text, text, uuid, text, text, text, jsonb
+) to service_role;
+
+
+-- -------------------------------------------------------------
+--  7. Keep updated_at honest
 -- -------------------------------------------------------------
 create or replace function public.touch_updated_at()
 returns trigger
@@ -210,7 +409,7 @@ create trigger touch_orders before update on public.orders
 
 
 -- -------------------------------------------------------------
---  7. WHO IS ALLOWED TO DO WHAT
+--  8. WHO IS ALLOWED TO DO WHAT
 --     Rules: visitors read products and delivery zones.
 --            Customers read only their own orders.
 --            Only the admin can change anything.
@@ -264,7 +463,7 @@ create policy order_items_read on public.order_items
 
 
 -- -------------------------------------------------------------
---  8. PRODUCT PHOTO STORAGE
+--  9. PRODUCT PHOTO STORAGE
 -- -------------------------------------------------------------
 insert into storage.buckets (id, name, public)
 values ('product-images', 'product-images', true)
@@ -280,7 +479,7 @@ create policy product_images_write on storage.objects
   with check (bucket_id = 'product-images' and public.is_admin());
 
 -- -------------------------------------------------------------
---  9. DELIVERY ZONES - starting values, edit them later in admin
+-- 10. DELIVERY ZONES - starting values, edit them later in admin
 -- -------------------------------------------------------------
 insert into public.delivery_zones (name, fee, details, needs_quote, sort_order) values
   ('Keffi',        0,    'Free delivery inside Keffi.',                          false, 1),
@@ -291,7 +490,7 @@ on conflict (name) do nothing;
 
 
 -- -------------------------------------------------------------
--- 10. PLACEHOLDER PRODUCTS - delete these once you add your own
+-- 11. PLACEHOLDER PRODUCTS - delete these once you add your own
 -- -------------------------------------------------------------
 insert into public.products (name, slug, category, description, price, unit, stock) values
   ('Pure Natural Honey',    'pure-natural-honey-1l',  'Honey',      'Raw, unprocessed honey straight from the farm.',      8000, '1 litre', 50),
@@ -305,7 +504,7 @@ on conflict (slug) do nothing;
 
 
 -- -------------------------------------------------------------
--- 11. MAKE YOURSELF ADMIN  (do this LAST)
+-- 12. MAKE YOURSELF ADMIN  (do this LAST)
 --
 --     First sign in to the shop once with Google, so your row exists.
 --     Then replace the email below with your own and run just this bit.

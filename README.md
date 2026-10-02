@@ -60,9 +60,11 @@ After that, fill in `server/.env` and `client/.env`.
 
 - [x] Project skeleton, front-end and back-end talking to each other
 - [x] Database design ready to paste into Supabase
-- [ ] Product catalogue
-- [ ] Cart and checkout page
-- [ ] Google sign-in
+- [x] Product catalogue and product detail page
+- [x] Shopping cart
+- [x] Checkout page
+- [x] Google sign-in
+- [x] Secure order saving
 - [ ] Paystack payments
-- [ ] Mailgun confirmation emails
+- [x] Mailgun confirmation emails
 - [ ] Admin page for orders, products and delivery fees

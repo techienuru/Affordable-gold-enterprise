@@ -18,6 +18,7 @@ Do these in order. Each one is about 5 minutes.
 7. Copy the first two again into `client/.env` as `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
    - The `service_role` key is a master key. It goes in `server/.env` only. Never in `client`.
 8. Left menu -> **SQL Editor** -> **New query**. Open `docs/supabase-schema.sql`, copy the whole file, paste it in, and press **Run**.
+   - You can safely run the whole file again after an update. Existing products and orders are kept.
 9. Left menu -> **Authentication** -> **Providers** -> **Google**. Enable it. You will need the Client ID and Secret from step 2 below, so come back to this.
 
 ---
@@ -42,6 +43,10 @@ Do these in order. Each one is about 5 minutes.
    `https://YOUR-PROJECT-REF.supabase.co/auth/v1/callback`
 8. Click Create. Copy the **Client ID** and **Client secret**.
 9. Go back to Supabase -> **Authentication** -> **Providers** -> **Google**. Paste both in and click Save.
+10. In Supabase, open **Authentication** -> **URL Configuration**.
+    - Set **Site URL** to `http://localhost:5173` while testing locally.
+    - Add `http://localhost:5173/**` under **Redirect URLs**.
+    - After deployment, change **Site URL** to your Vercel address and add the exact live checkout URL, for example `https://affordable-gold.vercel.app/checkout`.
 
 ---
 
