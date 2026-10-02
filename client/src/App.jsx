@@ -8,13 +8,19 @@ import {
 } from 'react-router-dom'
 import {
   getDeliveryZones,
+  getMyOrders,
   getProduct,
   getProducts,
   hasSupabaseConfig
 } from './lib/supabase.js'
 import { CartProvider, useCart } from './context/CartContext.jsx'
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
-import { createOrder } from './lib/api.js'
+import {
+  createOrder,
+  getAdminOrders,
+  updateAdminOrder
+} from './lib/api.js'
+import AdminCatalog from './components/AdminCatalog.jsx'
 
 const formatPrice = (value) => {
   const amount = Number(value)
@@ -29,6 +35,36 @@ const formatPrice = (value) => {
 }
 
 const formatKobo = (value) => formatPrice(value / 100)
+
+const formatDate = (value) => new Intl.DateTimeFormat('en-NG', {
+  dateStyle: 'medium',
+  timeStyle: 'short'
+}).format(new Date(value))
+
+const orderStatusLabels = {
+  pending: 'Pending confirmation',
+  confirmed: 'Confirmed',
+  processing: 'Being prepared',
+  shipped: 'On the way',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled'
+}
+
+const paymentStatusLabels = {
+  pending: 'Payment pending',
+  paid: 'Paid',
+  failed: 'Payment failed',
+  refunded: 'Refunded'
+}
+
+const paymentMethodLabels = {
+  card: 'Card',
+  transfer: 'Bank transfer',
+  pay_on_delivery: 'Pay on delivery'
+}
+
+const orderStatusOptions = Object.entries(orderStatusLabels)
+const paymentStatusOptions = Object.entries(paymentStatusLabels)
 
 function ArrowIcon() {
   return (
@@ -129,7 +165,7 @@ function ScrollToTop() {
 
 function SiteHeader() {
   const { itemCount } = useCart()
-  const { user, signOut } = useAuth()
+  const { user, profile, signOut } = useAuth()
   const customerName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email
   const firstName = customerName?.split(' ')[0]
 
@@ -148,6 +184,8 @@ function SiteHeader() {
           {user && (
             <div className="account-chip">
               <span>Hi, {firstName}</span>
+              <Link to="/orders">Orders</Link>
+              {profile?.role === 'admin' && <Link to="/admin">Admin</Link>}
               <button type="button" onClick={signOut} aria-label={`Sign out ${customerName}`}>
                 Sign out
               </button>
@@ -951,7 +989,7 @@ function CheckoutPage() {
               className="button button--google button--wide"
               type="button"
               disabled={authLoading}
-              onClick={signInWithGoogle}
+              onClick={() => signInWithGoogle('/checkout')}
             >
               {!authLoading && <GoogleIcon />}
               {authLoading ? 'Checking sign-in...' : 'Sign in with Google to continue'}
@@ -980,6 +1018,445 @@ function CheckoutPage() {
           </p>
         </aside>
       </div>
+    </main>
+  )
+}
+
+function OrdersPage() {
+  const {
+    user,
+    loading: authLoading,
+    error: authError,
+    signInWithGoogle,
+    signOut
+  } = useAuth()
+  const [orders, setOrders] = useState([])
+  const [state, setState] = useState('loading')
+
+  const loadOrders = async () => {
+    if (!user) return
+
+    setState('loading')
+
+    try {
+      const data = await getMyOrders()
+      setOrders(data)
+      setState('ready')
+    } catch {
+      setState('error')
+    }
+  }
+
+  useEffect(() => {
+    document.title = 'Your orders | Affordable Gold Enterprise'
+  }, [])
+
+  useEffect(() => {
+    if (authLoading) return undefined
+
+    if (!user) {
+      setOrders([])
+      setState('signed-out')
+      return undefined
+    }
+
+    let active = true
+    setState('loading')
+
+    getMyOrders()
+      .then((data) => {
+        if (!active) return
+        setOrders(data)
+        setState('ready')
+      })
+      .catch(() => {
+        if (active) setState('error')
+      })
+
+    return () => {
+      active = false
+    }
+  }, [authLoading, user])
+
+  if (authLoading) {
+    return (
+      <main className="shell detail-status">
+        <StatusPanel title="Checking your account" message="Your orders will appear here shortly." />
+      </main>
+    )
+  }
+
+  if (!user) {
+    return (
+      <main className="shell detail-status">
+        <StatusPanel
+          title="Sign in to see your orders"
+          message="Use the same Google account you used at checkout."
+          action={(
+            <button className="button button--google" type="button" onClick={() => signInWithGoogle('/orders')}>
+              <GoogleIcon /> Sign in with Google
+            </button>
+          )}
+        />
+        {authError && <p className="auth-error" role="alert">{authError}</p>}
+      </main>
+    )
+  }
+
+  return (
+    <main className="shell orders-page">
+      <div className="orders-heading">
+        <div>
+          <p className="eyebrow">Your account</p>
+          <h1>Your orders</h1>
+          <p>Track what you ordered and how payment is progressing.</p>
+        </div>
+        <button className="button button--outline" type="button" onClick={signOut}>Sign out</button>
+      </div>
+
+      {state === 'loading' && (
+        <div className="orders-list" aria-label="Loading orders" aria-busy="true">
+          {[1, 2].map((item) => (
+            <div className="order-card order-card--loading" key={item}>
+              <span className="skeleton skeleton--short" />
+              <span className="skeleton skeleton--title" />
+              <span className="skeleton skeleton--price" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {state === 'error' && (
+        <StatusPanel
+          title="Your orders could not be loaded"
+          message="Check your connection and try again."
+          action={<button className="button button--gold" type="button" onClick={loadOrders}>Try again</button>}
+        />
+      )}
+
+      {state === 'ready' && orders.length === 0 && (
+        <StatusPanel
+          title="You have no orders yet"
+          message="Your completed checkouts will appear here."
+          action={<Link className="button button--gold" to="/">Browse the shop</Link>}
+        />
+      )}
+
+      {state === 'ready' && orders.length > 0 && (
+        <div className="orders-list">
+          {orders.map((order) => {
+            const orderTone = ['cancelled'].includes(order.status) ? 'danger'
+              : ['delivered'].includes(order.status) ? 'success'
+                : ['confirmed', 'shipped'].includes(order.status) ? 'info'
+                  : 'pending'
+            const paymentTone = order.payment_status === 'paid' ? 'success'
+              : order.payment_status === 'failed' ? 'danger'
+                : 'pending'
+
+            return (
+              <article className="order-card" key={order.id}>
+                <header className="order-card__header">
+                  <div>
+                    <p>{formatDate(order.created_at)}</p>
+                    <h2>{order.order_number}</h2>
+                  </div>
+                  <div className="order-card__total">
+                    <span>{order.fee_confirmed ? 'Total' : 'Current total'}</span>
+                    <strong>{formatPrice(order.total)}</strong>
+                  </div>
+                </header>
+                <div className="order-card__statuses">
+                  <span className={`status-badge status-badge--${orderTone}`}>
+                    {orderStatusLabels[order.status] || order.status}
+                  </span>
+                  <span className={`status-badge status-badge--${paymentTone}`}>
+                    {paymentStatusLabels[order.payment_status] || order.payment_status}
+                  </span>
+                </div>
+                <details className="order-details">
+                  <summary>View order details</summary>
+                  <div className="order-details__content">
+                    <ul className="order-details__items">
+                      {(order.order_items || []).map((item) => (
+                        <li key={item.id}>
+                          <span>{item.quantity} × {item.product_name}<small>{item.unit}</small></span>
+                          <strong>{formatPrice(item.line_total)}</strong>
+                        </li>
+                      ))}
+                    </ul>
+                    <dl className="order-details__facts">
+                      <div><dt>Payment</dt><dd>{paymentMethodLabels[order.payment_method] || order.payment_method}</dd></div>
+                      <div><dt>Fulfilment</dt><dd>{order.fulfilment === 'pickup' ? 'Pickup' : 'Delivery'}</dd></div>
+                      {order.fulfilment === 'delivery' && (
+                        <div><dt>Delivery area</dt><dd>{order.delivery_zone_name}</dd></div>
+                      )}
+                      <div>
+                        <dt>Delivery fee</dt>
+                        <dd>{order.fee_confirmed ? formatPrice(order.delivery_fee) : 'To be confirmed'}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </details>
+              </article>
+            )
+          })}
+        </div>
+      )}
+    </main>
+  )
+}
+
+function AdminOrderCard({ order, accessToken, onUpdated }) {
+  const [status, setStatus] = useState(order.status)
+  const [paymentStatus, setPaymentStatus] = useState(order.payment_status)
+  const [adminNote, setAdminNote] = useState(order.admin_note || '')
+  const [saveState, setSaveState] = useState('idle')
+  const [message, setMessage] = useState('')
+  const changed = status !== order.status
+    || paymentStatus !== order.payment_status
+    || adminNote !== (order.admin_note || '')
+
+  const saveChanges = async (event) => {
+    event.preventDefault()
+    setSaveState('saving')
+    setMessage('')
+
+    try {
+      const updatedOrder = await updateAdminOrder(accessToken, order.id, {
+        status,
+        paymentStatus,
+        adminNote
+      })
+      onUpdated(updatedOrder)
+      setSaveState('saved')
+      setMessage('Changes saved.')
+    } catch (error) {
+      setSaveState('error')
+      setMessage(error.message)
+    }
+  }
+
+  return (
+    <article className="admin-order-card">
+      <header className="admin-order-card__header">
+        <div>
+          <p>{formatDate(order.created_at)}</p>
+          <h2>{order.order_number}</h2>
+        </div>
+        <strong>{formatPrice(order.total)}</strong>
+      </header>
+
+      <dl className="admin-customer-details">
+        <div><dt>Customer</dt><dd>{order.customer_name}</dd></div>
+        <div><dt>Email</dt><dd><a href={`mailto:${order.customer_email}`}>{order.customer_email}</a></dd></div>
+        <div><dt>Phone</dt><dd><a href={`tel:${order.customer_phone}`}>{order.customer_phone}</a></dd></div>
+        <div><dt>Fulfilment</dt><dd>{order.fulfilment === 'pickup' ? 'Pickup' : `Delivery — ${order.delivery_zone_name}`}</dd></div>
+        {order.delivery_address && <div><dt>Address</dt><dd>{order.delivery_address}</dd></div>}
+        {order.delivery_note && <div><dt>Customer note</dt><dd>{order.delivery_note}</dd></div>}
+      </dl>
+
+      <details className="admin-order-items">
+        <summary>{order.order_items?.length || 0} order {order.order_items?.length === 1 ? 'item' : 'items'}</summary>
+        <ul>
+          {(order.order_items || []).map((item) => (
+            <li key={item.id}>
+              <span>{item.quantity} × {item.product_name}<small>{item.unit}</small></span>
+              <strong>{formatPrice(item.line_total)}</strong>
+            </li>
+          ))}
+        </ul>
+      </details>
+
+      <form className="admin-order-form" onSubmit={saveChanges}>
+        <div className="admin-order-form__fields">
+          <div className="form-field">
+            <label htmlFor={`order-status-${order.id}`}>Order status</label>
+            <select id={`order-status-${order.id}`} value={status} onChange={(event) => setStatus(event.target.value)}>
+              {orderStatusOptions.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+            </select>
+          </div>
+          <div className="form-field">
+            <label htmlFor={`payment-status-${order.id}`}>Payment status</label>
+            <select id={`payment-status-${order.id}`} value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value)}>
+              {paymentStatusOptions.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+            </select>
+          </div>
+          <div className="form-field admin-order-form__note">
+            <label htmlFor={`admin-note-${order.id}`}>Private admin note <span>(optional)</span></label>
+            <textarea
+              id={`admin-note-${order.id}`}
+              rows="2"
+              maxLength="1000"
+              value={adminNote}
+              onChange={(event) => setAdminNote(event.target.value)}
+            />
+          </div>
+        </div>
+        <div className="admin-order-form__actions">
+          <p className={saveState === 'error' ? 'admin-save-message admin-save-message--error' : 'admin-save-message'} role="status">
+            {message}
+          </p>
+          <button className="button button--gold" type="submit" disabled={!changed || saveState === 'saving'}>
+            {saveState === 'saving' ? 'Saving...' : 'Save changes'}
+          </button>
+        </div>
+      </form>
+    </article>
+  )
+}
+
+function AdminPage() {
+  const {
+    user,
+    accessToken,
+    profile,
+    profileLoading,
+    loading: authLoading,
+    signInWithGoogle
+  } = useAuth()
+  const [orders, setOrders] = useState([])
+  const [state, setState] = useState('loading')
+  const [section, setSection] = useState('orders')
+
+  const loadOrders = async () => {
+    if (!accessToken) return
+
+    setState('loading')
+
+    try {
+      const data = await getAdminOrders(accessToken)
+      setOrders(data)
+      setState('ready')
+    } catch (error) {
+      setState(error.status === 403 ? 'denied' : 'error')
+    }
+  }
+
+  useEffect(() => {
+    document.title = 'Admin orders | Affordable Gold Enterprise'
+  }, [])
+
+  useEffect(() => {
+    if (authLoading || profileLoading || profile?.role !== 'admin' || !accessToken) return
+    loadOrders()
+  }, [authLoading, profileLoading, profile?.role, accessToken])
+
+  if (authLoading || profileLoading) {
+    return (
+      <main className="shell detail-status">
+        <StatusPanel title="Checking admin access" message="This will only take a moment." />
+      </main>
+    )
+  }
+
+  if (!user) {
+    return (
+      <main className="shell detail-status">
+        <StatusPanel
+          title="Admin sign-in required"
+          message="Sign in with the Google account assigned as an admin."
+          action={(
+            <button className="button button--google" type="button" onClick={() => signInWithGoogle('/admin')}>
+              <GoogleIcon /> Sign in with Google
+            </button>
+          )}
+        />
+      </main>
+    )
+  }
+
+  if (profile?.role !== 'admin' || state === 'denied') {
+    return (
+      <main className="shell detail-status">
+        <StatusPanel
+          title="Admin access is not enabled"
+          message="This signed-in profile does not have the admin role in Supabase."
+          action={<Link className="button button--gold" to="/orders">View your orders</Link>}
+        />
+      </main>
+    )
+  }
+
+  const openOrders = orders.filter((order) => !['delivered', 'cancelled'].includes(order.status)).length
+  const pendingPayments = orders.filter((order) => order.payment_status === 'pending').length
+
+  return (
+    <main className="shell admin-page">
+      <div className="admin-heading">
+        <p className="eyebrow">Back office</p>
+        <h1>Shop admin</h1>
+        <p>Manage orders, products and delivery settings in one place.</p>
+      </div>
+
+      <nav className="admin-tabs" aria-label="Admin sections">
+        {[
+          ['orders', 'Orders'],
+          ['products', 'Products'],
+          ['delivery', 'Delivery']
+        ].map(([value, label]) => (
+          <button
+            className={section === value ? 'admin-tab admin-tab--active' : 'admin-tab'}
+            type="button"
+            aria-pressed={section === value}
+            onClick={() => setSection(value)}
+            key={value}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {section === 'orders' ? (
+        <>
+
+      <section className="admin-stats" aria-label="Order summary">
+        <div><strong>{orders.length}</strong><span>Total orders</span></div>
+        <div><strong>{openOrders}</strong><span>Open orders</span></div>
+        <div><strong>{pendingPayments}</strong><span>Pending payments</span></div>
+      </section>
+
+      {state === 'loading' && (
+        <div className="orders-list" aria-label="Loading admin orders" aria-busy="true">
+          {[1, 2].map((item) => (
+            <div className="admin-order-card order-card--loading" key={item}>
+              <span className="skeleton skeleton--short" />
+              <span className="skeleton skeleton--title" />
+              <span className="skeleton skeleton--price" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {state === 'error' && (
+        <StatusPanel
+          title="Admin orders could not be loaded"
+          message="Check the API connection and try again."
+          action={<button className="button button--gold" type="button" onClick={loadOrders}>Try again</button>}
+        />
+      )}
+
+      {state === 'ready' && orders.length === 0 && (
+        <StatusPanel title="There are no orders yet" message="New customer orders will appear here." />
+      )}
+
+      {state === 'ready' && orders.length > 0 && (
+        <section className="admin-order-list" aria-label="Customer orders">
+          {orders.map((order) => (
+            <AdminOrderCard
+              order={order}
+              accessToken={accessToken}
+              key={order.id}
+              onUpdated={(updatedOrder) => setOrders((current) => current.map((item) => (
+                item.id === updatedOrder.id ? { ...item, ...updatedOrder } : item
+              )))}
+            />
+          ))}
+        </section>
+      )}
+        </>
+      ) : (
+        <AdminCatalog accessToken={accessToken} section={section} />
+      )}
     </main>
   )
 }
@@ -1014,6 +1491,8 @@ export default function App() {
               <Route path="/products/:slug" element={<ProductDetailPage />} />
               <Route path="/cart" element={<CartPage />} />
               <Route path="/checkout" element={<CheckoutPage />} />
+              <Route path="/orders" element={<OrdersPage />} />
+              <Route path="/admin" element={<AdminPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </div>

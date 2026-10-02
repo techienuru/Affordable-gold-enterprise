@@ -24,6 +24,22 @@ export const getUserFromAccessToken = async (accessToken) => {
   return data.user
 }
 
+export const isAdminUser = async (userId) => {
+  if (!supabaseAdmin) return false
+
+  const { data, error } = await supabaseAdmin
+    .from('profiles')
+    .select('role')
+    .eq('id', userId)
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  return data?.role === 'admin'
+}
+
 export const saveOrder = async (order) => {
   if (!supabaseAdmin) {
     throw new Error('Supabase is not configured')
@@ -89,5 +105,155 @@ export const getOrderForEmail = async (orderId) => {
     throw error
   }
 
+  return data
+}
+
+export const getAdminOrders = async () => {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase is not configured')
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('orders')
+    .select(`
+      id,
+      order_number,
+      created_at,
+      updated_at,
+      customer_name,
+      customer_email,
+      customer_phone,
+      fulfilment,
+      delivery_zone_name,
+      delivery_address,
+      delivery_note,
+      delivery_fee,
+      fee_confirmed,
+      subtotal,
+      total,
+      payment_method,
+      payment_status,
+      status,
+      admin_note,
+      order_items (
+        id,
+        product_name,
+        unit,
+        unit_price,
+        quantity,
+        line_total
+      )
+    `)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw error
+  }
+
+  return data
+}
+
+export const updateAdminOrder = async (orderId, update) => {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase is not configured')
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('orders')
+    .update({
+      status: update.status,
+      payment_status: update.paymentStatus,
+      admin_note: update.adminNote
+    })
+    .eq('id', orderId)
+    .select('id,status,payment_status,admin_note,updated_at')
+    .single()
+
+  if (error) {
+    throw error
+  }
+
+  return data
+}
+
+export const getAdminCatalog = async () => {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase is not configured')
+  }
+
+  const [productsResult, zonesResult] = await Promise.all([
+    supabaseAdmin
+      .from('products')
+      .select('id,name,slug,category,description,price,unit,image_url,stock,is_active,updated_at')
+      .order('category')
+      .order('name'),
+    supabaseAdmin
+      .from('delivery_zones')
+      .select('id,name,fee,details,needs_quote,is_active,sort_order,updated_at')
+      .order('sort_order')
+      .order('name')
+  ])
+
+  if (productsResult.error) throw productsResult.error
+  if (zonesResult.error) throw zonesResult.error
+
+  return {
+    products: productsResult.data,
+    deliveryZones: zonesResult.data
+  }
+}
+
+export const saveAdminProduct = async (productId, product) => {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase is not configured')
+  }
+
+  const values = {
+    name: product.name,
+    slug: product.slug,
+    category: product.category,
+    description: product.description,
+    price: product.price,
+    unit: product.unit,
+    image_url: product.imageUrl,
+    stock: product.stock,
+    is_active: product.isActive
+  }
+
+  const query = productId
+    ? supabaseAdmin.from('products').update(values).eq('id', productId)
+    : supabaseAdmin.from('products').insert(values)
+
+  const { data, error } = await query
+    .select('id,name,slug,category,description,price,unit,image_url,stock,is_active,updated_at')
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export const saveAdminDeliveryZone = async (zoneId, zone) => {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase is not configured')
+  }
+
+  const values = {
+    name: zone.name,
+    fee: zone.fee,
+    details: zone.details,
+    needs_quote: zone.needsQuote,
+    is_active: zone.isActive,
+    sort_order: zone.sortOrder
+  }
+
+  const query = zoneId
+    ? supabaseAdmin.from('delivery_zones').update(values).eq('id', zoneId)
+    : supabaseAdmin.from('delivery_zones').insert(values)
+
+  const { data, error } = await query
+    .select('id,name,fee,details,needs_quote,is_active,sort_order,updated_at')
+    .single()
+
+  if (error) throw error
   return data
 }

@@ -1,5 +1,14 @@
 const allowedFulfilment = new Set(['delivery', 'pickup'])
 const allowedPaymentMethods = new Set(['transfer', 'pay_on_delivery'])
+const allowedOrderStatuses = new Set([
+  'pending',
+  'confirmed',
+  'processing',
+  'shipped',
+  'delivered',
+  'cancelled'
+])
+const allowedPaymentStatuses = new Set(['pending', 'paid', 'failed', 'refunded'])
 
 const cleanText = (value, maximumLength) => typeof value === 'string'
   ? value.trim().slice(0, maximumLength)
@@ -60,4 +69,20 @@ export const validateOrderRequest = (body) => {
       items: cleanItems
     }
   }
+}
+
+export const validateAdminOrderUpdate = (body) => {
+  const status = cleanText(body?.status, 30)
+  const paymentStatus = cleanText(body?.paymentStatus, 30)
+  const adminNote = cleanText(body?.adminNote, 1000) || null
+
+  if (!allowedOrderStatuses.has(status)) {
+    return { error: 'Choose a valid order status.' }
+  }
+
+  if (!allowedPaymentStatuses.has(paymentStatus)) {
+    return { error: 'Choose a valid payment status.' }
+  }
+
+  return { update: { status, paymentStatus, adminNote } }
 }

@@ -67,4 +67,6 @@ After that, fill in `server/.env` and `client/.env`.
 - [x] Secure order saving
 - [ ] Paystack payments
 - [x] Mailgun confirmation emails
-- [ ] Admin page for orders, products and delivery fees
+- [x] Customer order history
+- [x] Admin order management
+- [x] Admin product, delivery-fee and photo management
