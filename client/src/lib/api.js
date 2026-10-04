@@ -78,3 +78,41 @@ export const saveAdminDeliveryZone = async (accessToken, zoneId, zone) => {
 
   return result.deliveryZone
 }
+
+export const startCardPayment = async (accessToken, orderId) => {
+  const response = await fetch(`${apiUrl}/payments/paystack/initialize`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ orderId })
+  })
+
+  const result = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    throw new Error(result.error || 'The card payment could not be started.')
+  }
+
+  return result
+}
+
+export const verifyCardPayment = async (accessToken, reference) => {
+  const response = await fetch(
+    `${apiUrl}/payments/paystack/verify?reference=${encodeURIComponent(reference)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    }
+  )
+
+  const result = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    throw new Error(result.error || 'The payment could not be checked.')
+  }
+
+  return result
+}

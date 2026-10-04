@@ -158,15 +158,34 @@ export const updateAdminOrder = async (orderId, update) => {
     throw new Error('Supabase is not configured')
   }
 
+  const values = {
+    status: update.status,
+    payment_status: update.paymentStatus,
+    admin_note: update.adminNote
+  }
+
+  if (update.deliveryFee !== null && update.deliveryFee !== undefined) {
+    const { data: currentOrder, error: readError } = await supabaseAdmin
+      .from('orders')
+      .select('subtotal')
+      .eq('id', orderId)
+      .single()
+
+    if (readError) throw readError
+
+    const subtotalKobo = Math.round(Number(currentOrder.subtotal) * 100)
+    const feeKobo = Math.round(Number(update.deliveryFee) * 100)
+
+    values.delivery_fee = update.deliveryFee
+    values.fee_confirmed = true
+    values.total = ((subtotalKobo + feeKobo) / 100).toFixed(2)
+  }
+
   const { data, error } = await supabaseAdmin
     .from('orders')
-    .update({
-      status: update.status,
-      payment_status: update.paymentStatus,
-      admin_note: update.adminNote
-    })
+    .update(values)
     .eq('id', orderId)
-    .select('id,status,payment_status,admin_note,updated_at')
+    .select('id,status,payment_status,admin_note,delivery_fee,fee_confirmed,subtotal,total,updated_at')
     .single()
 
   if (error) {
@@ -256,4 +275,110 @@ export const saveAdminDeliveryZone = async (zoneId, zone) => {
 
   if (error) throw error
   return data
+}
+
+export const getOrderForPayment = async (orderId, userId) => {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase is not configured')
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('orders')
+    .select('id,order_number,user_id,customer_email,total,fee_confirmed,payment_status,paystack_reference')
+    .eq('id', orderId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) throw error
+  return data
+}
+
+export const getOrderByPaystackReference = async (reference) => {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase is not configured')
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('orders')
+    .select('id,order_number,user_id,customer_email,total,payment_status,paystack_reference')
+    .eq('paystack_reference', reference)
+    .maybeSingle()
+
+  if (error) throw error
+  return data
+}
+
+export const getOrderById = async (orderId) => {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase is not configured')
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('orders')
+    .select('id,order_number,user_id,customer_email,total,payment_status,paystack_reference')
+    .eq('id', orderId)
+    .maybeSingle()
+
+  if (error) throw error
+  return data
+}
+
+export const savePaystackReference = async (orderId, reference) => {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase is not configured')
+  }
+
+  const { error } = await supabaseAdmin
+    .from('orders')
+    .update({ paystack_reference: reference })
+    .eq('id', orderId)
+    .neq('payment_status', 'paid')
+
+  if (error) throw error
+}
+
+export const markOrderPaid = async (orderId, reference) => {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase is not configured')
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('orders')
+    .update({
+      payment_status: 'paid',
+      paystack_reference: reference
+    })
+    .eq('id', orderId)
+    .neq('payment_status', 'paid')
+    .select('id,order_number,payment_status,status,total')
+    .maybeSingle()
+
+  if (error) throw error
+
+  if (data) {
+    return { order: data, changed: true }
+  }
+
+  const { data: existing, error: readError } = await supabaseAdmin
+    .from('orders')
+    .select('id,order_number,payment_status,status,total')
+    .eq('id', orderId)
+    .maybeSingle()
+
+  if (readError) throw readError
+  return { order: existing, changed: false }
+}
+
+export const markOrderPaymentFailed = async (orderId) => {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase is not configured')
+  }
+
+  const { error } = await supabaseAdmin
+    .from('orders')
+    .update({ payment_status: 'failed' })
+    .eq('id', orderId)
+    .neq('payment_status', 'paid')
+
+  if (error) throw error
 }

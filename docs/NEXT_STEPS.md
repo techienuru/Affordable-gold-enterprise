@@ -294,3 +294,14 @@ This is optional but recommended after the buying flow works.
 - [ ] Real products, photos, prices and delivery fees are published.
 - [ ] Customer policies and contact information are available.
 
+
+
+
+ You need to do three things
+
+  - Paste the Gmail app password into SMTP_PASS in server/.env, and add
+    the same SMTP settings to your back-end host's environment
+  - In Paystack: Settings → API Keys & Webhooks → Webhook URL =
+    https://<your-api-domain>/api/payments/paystack/webhook.
+
+  - Redeploy the API and the shop.

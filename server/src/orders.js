@@ -1,5 +1,5 @@
 const allowedFulfilment = new Set(['delivery', 'pickup'])
-const allowedPaymentMethods = new Set(['transfer', 'pay_on_delivery'])
+const allowedPaymentMethods = new Set(['card', 'transfer', 'pay_on_delivery'])
 const allowedOrderStatuses = new Set([
   'pending',
   'confirmed',
@@ -13,6 +13,11 @@ const allowedPaymentStatuses = new Set(['pending', 'paid', 'failed', 'refunded']
 const cleanText = (value, maximumLength) => typeof value === 'string'
   ? value.trim().slice(0, maximumLength)
   : ''
+
+const cleanMoney = (value) => {
+  const amount = String(value ?? '').trim()
+  return /^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/.test(amount) ? amount : null
+}
 
 export const validateOrderRequest = (body) => {
   const customerName = cleanText(body?.customerName, 120)
@@ -37,7 +42,7 @@ export const validateOrderRequest = (body) => {
   }
 
   if (!allowedPaymentMethods.has(paymentMethod)) {
-    return { error: 'Choose bank transfer or pay on delivery.' }
+    return { error: 'Choose card, bank transfer or pay on delivery.' }
   }
 
   if (items.length === 0 || items.length > 100) {
@@ -75,6 +80,10 @@ export const validateAdminOrderUpdate = (body) => {
   const status = cleanText(body?.status, 30)
   const paymentStatus = cleanText(body?.paymentStatus, 30)
   const adminNote = cleanText(body?.adminNote, 1000) || null
+  const feeGiven = body?.deliveryFee !== undefined
+    && body?.deliveryFee !== null
+    && String(body.deliveryFee).trim() !== ''
+  const deliveryFee = cleanMoney(body?.deliveryFee)
 
   if (!allowedOrderStatuses.has(status)) {
     return { error: 'Choose a valid order status.' }
@@ -84,5 +93,16 @@ export const validateAdminOrderUpdate = (body) => {
     return { error: 'Choose a valid payment status.' }
   }
 
-  return { update: { status, paymentStatus, adminNote } }
+  if (feeGiven && deliveryFee === null) {
+    return { error: 'Enter a valid delivery fee, for example 2500 or 2500.50.' }
+  }
+
+  return {
+    update: {
+      status,
+      paymentStatus,
+      adminNote,
+      deliveryFee: feeGiven ? deliveryFee : null
+    }
+  }
 }

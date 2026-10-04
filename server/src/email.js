@@ -1,5 +1,6 @@
 import FormData from 'form-data'
 import Mailgun from 'mailgun.js'
+import nodemailer from 'nodemailer'
 
 const mailgunKey = process.env.MAILGUN_API_KEY
 const mailgunDomain = process.env.MAILGUN_DOMAIN
@@ -23,6 +24,28 @@ if (mailgunRegion.toLowerCase() === 'eu') {
 
 const mailgunClient = hasMailgunConfig
   ? new Mailgun(FormData).client(clientOptions)
+  : null
+
+const smtpHost = process.env.SMTP_HOST
+const smtpPort = Number(process.env.SMTP_PORT || 587)
+const smtpSecure = String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true'
+const smtpUser = process.env.SMTP_USER
+const smtpPass = process.env.SMTP_PASS
+const smtpFromEmail = process.env.SMTP_FROM_EMAIL || smtpUser
+const smtpFromName = process.env.SMTP_FROM_NAME || fromName
+
+export const hasSmtpConfig = Boolean(smtpHost && smtpUser && smtpPass && smtpFromEmail)
+
+const smtpTransport = hasSmtpConfig
+  ? nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpSecure,
+      auth: {
+        user: smtpUser,
+        pass: smtpPass
+      }
+    })
   : null
 
 const formatMoney = (value) => new Intl.NumberFormat('en-NG', {
@@ -169,7 +192,6 @@ const adminMessage = (order) => {
   `
 
   return {
-    from: `${fromName} <${fromEmail}>`,
     to: [orderAlertEmail],
     subject: `New order ${order.order_number} — ${formatMoney(order.total)}`,
     text,
@@ -177,18 +199,52 @@ const adminMessage = (order) => {
   }
 }
 
+const mailgunSender = (message) => mailgunClient.messages.create(mailgunDomain, {
+  from: `${fromName} <${fromEmail}>`,
+  to: message.to,
+  subject: message.subject,
+  text: message.text,
+  html: message.html
+})
+
+const smtpSender = (message) => smtpTransport.sendMail({
+  from: `${smtpFromName} <${smtpFromEmail}>`,
+  to: message.to.join(', '),
+  subject: message.subject,
+  text: message.text,
+  html: message.html
+})
+
+const sendMessage = async (message) => {
+  const senders = []
+
+  if (mailgunClient) senders.push(['Mailgun', mailgunSender])
+  if (smtpTransport) senders.push(['SMTP', smtpSender])
+
+  for (const [provider, send] of senders) {
+    try {
+      await send(message)
+      return { sent: true, provider }
+    } catch (error) {
+      console.error(`${provider} could not send the email:`, error.message)
+    }
+  }
+
+  return { sent: false, provider: null }
+}
+
 export const sendOrderEmails = async (order) => {
-  if (!mailgunClient) {
+  if (!mailgunClient && !smtpTransport) {
     return { customerSent: false, adminSent: false }
   }
 
   const [customerResult, adminResult] = await Promise.allSettled([
-    mailgunClient.messages.create(mailgunDomain, customerMessage(order)),
-    mailgunClient.messages.create(mailgunDomain, adminMessage(order))
+    sendMessage(customerMessage(order)),
+    sendMessage(adminMessage(order))
   ])
 
   return {
-    customerSent: customerResult.status === 'fulfilled',
-    adminSent: adminResult.status === 'fulfilled'
+    customerSent: customerResult.status === 'fulfilled' && customerResult.value.sent,
+    adminSent: adminResult.status === 'fulfilled' && adminResult.value.sent
   }
 }

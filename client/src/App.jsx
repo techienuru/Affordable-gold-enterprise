@@ -18,7 +18,9 @@ import { AuthProvider, useAuth } from './context/AuthContext.jsx'
 import {
   createOrder,
   getAdminOrders,
-  updateAdminOrder
+  startCardPayment,
+  updateAdminOrder,
+  verifyCardPayment
 } from './lib/api.js'
 import AdminCatalog from './components/AdminCatalog.jsx'
 
@@ -709,6 +711,11 @@ function CheckoutPage() {
   const [orderState, setOrderState] = useState('idle')
   const [orderError, setOrderError] = useState('')
   const [orderConfirmation, setOrderConfirmation] = useState(null)
+  const [paymentReference] = useState(() => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('reference') || params.get('trxref') || ''
+  })
+  const [paymentReturn, setPaymentReturn] = useState(paymentReference ? { state: 'checking' } : null)
 
   useEffect(() => {
     document.title = 'Checkout | Affordable Gold Enterprise'
@@ -725,6 +732,89 @@ function CheckoutPage() {
       })
       .catch(() => setZoneState('error'))
   }, [])
+
+  const selectedZone = zones.find((zone) => zone.id === zoneId)
+  const needsQuote = fulfilment === 'delivery' && selectedZone?.needs_quote
+  const deliveryFeeKobo = fulfilment === 'delivery' && selectedZone && !needsQuote
+    ? Math.round(Number(selectedZone.fee) * 100)
+    : 0
+  const cardAvailable = !needsQuote && (fulfilment === 'pickup' || Boolean(selectedZone))
+
+  useEffect(() => {
+    if (paymentMethod === 'card' && !cardAvailable) {
+      setPaymentMethod('transfer')
+    }
+  }, [paymentMethod, cardAvailable])
+
+  useEffect(() => {
+    if (paymentReference) {
+      window.history.replaceState({}, '', '/checkout')
+    }
+  }, [paymentReference])
+
+  useEffect(() => {
+    if (!paymentReference || authLoading) return undefined
+
+    if (!accessToken) {
+      setPaymentReturn({
+        state: 'error',
+        message: 'Sign in with the same Google account you paid with to check this payment.'
+      })
+      return undefined
+    }
+
+    let active = true
+
+    verifyCardPayment(accessToken, paymentReference)
+      .then((result) => {
+        if (!active) return
+
+        setPaymentReturn({
+          state: result.status || 'pending',
+          orderNumber: result.orderNumber,
+          total: result.total,
+          message: result.message
+        })
+      })
+      .catch((error) => {
+        if (active) setPaymentReturn({ state: 'error', message: error.message })
+      })
+
+    return () => {
+      active = false
+    }
+  }, [paymentReference, accessToken, authLoading])
+
+  if (paymentReturn) {
+    const titles = {
+      checking: 'Checking your payment',
+      paid: 'Payment received',
+      failed: 'Payment not completed',
+      pending: 'Payment still pending',
+      mismatch: 'Payment needs a check',
+      error: 'We could not confirm the payment'
+    }
+    const messages = {
+      checking: 'Please wait a moment while we confirm your payment with Paystack.',
+      paid: `Order ${paymentReturn.orderNumber} is paid.${paymentReturn.total ? ` Total ${formatPrice(paymentReturn.total)}.` : ''} A confirmation email is on its way.`,
+      failed: `Order ${paymentReturn.orderNumber} was not paid. You can try again from your orders page.`,
+      pending: `Paystack has not confirmed order ${paymentReturn.orderNumber} yet. If money left your account, it will show as paid shortly.`,
+      mismatch: paymentReturn.message || 'We will call you to sort this payment out.',
+      error: paymentReturn.message || 'Please try again.'
+    }
+
+    return (
+      <main className="shell detail-status order-confirmation">
+        <StatusPanel
+          title={titles[paymentReturn.state] || 'Payment status'}
+          message={messages[paymentReturn.state] || 'Please try again.'}
+          action={paymentReturn.state === 'checking'
+            ? undefined
+            : <Link className="button button--gold" to="/orders">View your orders</Link>}
+        />
+      </main>
+    )
+  }
 
   if (orderConfirmation) {
     const feeMessage = orderConfirmation.fee_confirmed
@@ -757,11 +847,6 @@ function CheckoutPage() {
     )
   }
 
-  const selectedZone = zones.find((zone) => zone.id === zoneId)
-  const needsQuote = fulfilment === 'delivery' && selectedZone?.needs_quote
-  const deliveryFeeKobo = fulfilment === 'delivery' && selectedZone && !needsQuote
-    ? Math.round(Number(selectedZone.fee) * 100)
-    : 0
   const totalKobo = subtotalKobo + deliveryFeeKobo
   const customerName = user?.user_metadata?.full_name || user?.user_metadata?.name || ''
   const savingOrder = orderState === 'saving'
@@ -793,6 +878,21 @@ function CheckoutPage() {
           quantity: item.quantity
         }))
       })
+
+      if (paymentMethod === 'card') {
+        try {
+          const payment = await startCardPayment(accessToken, savedOrder.id)
+
+          clearCart()
+          window.location.assign(payment.authorizationUrl)
+
+          return
+        } catch (error) {
+          setOrderError(`${error.message} Order ${savedOrder.order_number} is saved. You can pay it from your orders page.`)
+          setOrderState('error')
+          return
+        }
+      }
 
       setOrderConfirmation(savedOrder)
       setOrderState('complete')
@@ -939,7 +1039,7 @@ function CheckoutPage() {
             </div>
             <div className="payment-choices">
               {[
-                ['card', 'Card', 'Coming after Paystack setup', true],
+                ['card', 'Card', cardAvailable ? 'Pay securely with your card now' : 'We confirm the delivery fee first', !cardAvailable],
                 ['transfer', 'Bank transfer', 'We confirm your payment before dispatch', false],
                 ['pay_on_delivery', 'Pay on delivery', 'Available after we confirm your order', false]
               ].map(([value, label, note, disabled]) => (
@@ -1010,7 +1110,7 @@ function CheckoutPage() {
               form="checkout-form"
               disabled={savingOrder || deliveryUnavailable || !accessToken}
             >
-              {savingOrder ? 'Saving your order...' : 'Place order'}
+              {savingOrder ? 'Saving your order...' : submitLabel}
             </button>
           )}
           <p className="checkout-summary__secure">
@@ -1025,6 +1125,7 @@ function CheckoutPage() {
 function OrdersPage() {
   const {
     user,
+    accessToken,
     loading: authLoading,
     error: authError,
     signInWithGoogle,
@@ -1032,6 +1133,8 @@ function OrdersPage() {
   } = useAuth()
   const [orders, setOrders] = useState([])
   const [state, setState] = useState('loading')
+  const [payingOrderId, setPayingOrderId] = useState('')
+  const [payError, setPayError] = useState('')
 
   const loadOrders = async () => {
     if (!user) return
@@ -1078,6 +1181,20 @@ function OrdersPage() {
     }
   }, [authLoading, user])
 
+  const payForOrder = async (order) => {
+    setPayError('')
+    setPayingOrderId(order.id)
+
+    try {
+      const payment = await startCardPayment(accessToken, order.id)
+
+      window.location.assign(payment.authorizationUrl)
+    } catch (error) {
+      setPayError(error.message)
+      setPayingOrderId('')
+    }
+  }
+
   if (authLoading) {
     return (
       <main className="shell detail-status">
@@ -1113,6 +1230,8 @@ function OrdersPage() {
         </div>
         <button className="button button--outline" type="button" onClick={signOut}>Sign out</button>
       </div>
+
+      {payError && <p className="order-error" role="alert">{payError}</p>}
 
       {state === 'loading' && (
         <div className="orders-list" aria-label="Loading orders" aria-busy="true">
@@ -1173,6 +1292,22 @@ function OrdersPage() {
                     {paymentStatusLabels[order.payment_status] || order.payment_status}
                   </span>
                 </div>
+                {order.payment_method === 'card' && order.payment_status !== 'paid' && order.status !== 'cancelled' && (
+                  <div className="order-card__pay">
+                    {order.fee_confirmed ? (
+                      <button
+                        className="button button--gold"
+                        type="button"
+                        disabled={payingOrderId === order.id}
+                        onClick={() => payForOrder(order)}
+                      >
+                        {payingOrderId === order.id ? 'Opening Paystack...' : 'Pay now'}
+                      </button>
+                    ) : (
+                      <p>We will confirm the delivery fee, then you can pay by card here.</p>
+                    )}
+                  </div>
+                )}
                 <details className="order-details">
                   <summary>View order details</summary>
                   <div className="order-details__content">
@@ -1210,11 +1345,14 @@ function AdminOrderCard({ order, accessToken, onUpdated }) {
   const [status, setStatus] = useState(order.status)
   const [paymentStatus, setPaymentStatus] = useState(order.payment_status)
   const [adminNote, setAdminNote] = useState(order.admin_note || '')
+  const storedFee = order.fee_confirmed ? String(order.delivery_fee ?? '') : ''
+  const [deliveryFee, setDeliveryFee] = useState(storedFee)
   const [saveState, setSaveState] = useState('idle')
   const [message, setMessage] = useState('')
   const changed = status !== order.status
     || paymentStatus !== order.payment_status
     || adminNote !== (order.admin_note || '')
+    || deliveryFee.trim() !== storedFee
 
   const saveChanges = async (event) => {
     event.preventDefault()
@@ -1225,9 +1363,11 @@ function AdminOrderCard({ order, accessToken, onUpdated }) {
       const updatedOrder = await updateAdminOrder(accessToken, order.id, {
         status,
         paymentStatus,
-        adminNote
+        adminNote,
+        deliveryFee: deliveryFee.trim() === '' ? null : deliveryFee.trim()
       })
       onUpdated(updatedOrder)
+      setDeliveryFee(updatedOrder.fee_confirmed ? String(updatedOrder.delivery_fee ?? '') : '')
       setSaveState('saved')
       setMessage('Changes saved.')
     } catch (error) {
@@ -1280,6 +1420,17 @@ function AdminOrderCard({ order, accessToken, onUpdated }) {
             <select id={`payment-status-${order.id}`} value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value)}>
               {paymentStatusOptions.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
             </select>
+          </div>
+          <div className="form-field">
+            <label htmlFor={`delivery-fee-${order.id}`}>Delivery fee (₦)</label>
+            <input
+              id={`delivery-fee-${order.id}`}
+              inputMode="decimal"
+              value={deliveryFee}
+              onChange={(event) => setDeliveryFee(event.target.value)}
+              placeholder="For example 2500"
+            />
+            <small>Filling this in confirms the fee and updates the order total.</small>
           </div>
           <div className="form-field admin-order-form__note">
             <label htmlFor={`admin-note-${order.id}`}>Private admin note <span>(optional)</span></label>

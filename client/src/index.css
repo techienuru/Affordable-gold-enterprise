@@ -1694,6 +1694,21 @@ img {
   gap: 8px;
 }
 
+.order-card__pay {
+  padding: 0 22px 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.order-card__pay p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .status-badge {
   min-height: 28px;
   display: inline-flex;

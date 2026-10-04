@@ -60,6 +60,27 @@ Do these in order. Each one is about 5 minutes.
 
 Note: nothing can be sent until the domain is verified. Until then, use the Mailgun **sandbox** domain and add a few recipient addresses by hand.
 
+### Gmail fallback (used automatically when Mailgun fails)
+
+Mailgun is always tried first. If Mailgun cannot send, the server tries Gmail instead,
+so a customer never misses an order confirmation.
+
+1. Use a Gmail account you control, for example `ibrahimnurudeenshehu1447@gmail.com`.
+2. Turn on **2-Step Verification** at `myaccount.google.com/security`.
+3. Open `myaccount.google.com/apppasswords`, create an app password, and copy it.
+4. Put these in `server/.env`, and in the back-end hosting settings:
+   - `SMTP_HOST=smtp.gmail.com`
+   - `SMTP_PORT=587`
+   - `SMTP_SECURE=false`
+   - `SMTP_USER` - the Gmail address
+   - `SMTP_PASS` - the 16-character app password
+   - `SMTP_FROM_EMAIL` - the same Gmail address
+5. Restart the server, or redeploy the back end.
+
+Fallback emails come from the Gmail address, not from `orders@affordablegold.mooo.com`,
+because Gmail is not allowed to send as your own domain. Never put the app password in
+`client/.env`.
+
 ---
 
 ## 4. Paystack (the payments)
@@ -69,6 +90,14 @@ Note: nothing can be sent until the domain is verified. Until then, use the Mail
 3. Make sure you are on **Test mode**.
 4. Copy the **Test Secret Key** into `server/.env` as `PAYSTACK_SECRET_KEY`.
 5. Copy the **Test Public Key** into both `server/.env` and `client/.env` as `PAYSTACK_PUBLIC_KEY` / `VITE_PAYSTACK_PUBLIC_KEY`.
+6. Still in **Settings** -> **API Keys & Webhooks**, set the **Webhook URL** to
+   `https://YOUR-BACK-END/api/payments/paystack/webhook`, for example
+   `https://affordable-gold-enterprise.vercel.app/api/payments/paystack/webhook`.
+7. Redeploy the back end after changing any setting.
+
+Card payments are offered only when the delivery fee is already known: Keffi, Abuja,
+Lafia and pickup. For `Other states`, the order saves first. Enter the agreed delivery
+fee in the admin area, and the customer can then pay by card from their orders page.
 
 ---
 
