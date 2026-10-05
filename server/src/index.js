@@ -229,6 +229,7 @@ const signedInUser = async (req, res) => {
 }
 
 const PAYSTACK_MINIMUM_KOBO = 5000
+const MOBILE_PAYMENT_CALLBACK = 'affordablegold://payment/return'
 
 app.post('/api/payments/paystack/initialize', async (req, res) => {
   if (!hasServerSupabaseConfig || !hasPaystackConfig) {
@@ -273,13 +274,16 @@ app.post('/api/payments/paystack/initialize', async (req, res) => {
   }
 
   const reference = `${order.order_number}-${Date.now()}`
+  const callbackUrl = req.body?.platform === 'mobile'
+    ? MOBILE_PAYMENT_CALLBACK
+    : `${CLIENT_URL}/checkout?payment=return`
 
   try {
     const transaction = await initializePaystackPayment({
       email: order.customer_email,
       amountKobo,
       reference,
-      callbackUrl: `${CLIENT_URL}/checkout?payment=return`,
+      callbackUrl,
       metadata: {
         order_id: order.id,
         order_number: order.order_number

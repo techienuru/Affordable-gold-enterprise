@@ -12,12 +12,13 @@ emails, and let people sign in with Google.
 | Part            | Tool                            |
 | --------------- | ------------------------------- |
 | Shop front-end  | React + Vite                    |
+| Mobile app      | Expo + React Native + TypeScript|
 | Back-end API    | Node + Express                  |
 | Database        | Supabase (Postgres)             |
 | Sign-in         | Google, handled by Supabase     |
 | Payments        | Paystack                        |
 | Emails          | Mailgun                         |
-| Hosting         | Vercel (front-end), Render (API)|
+| Hosting         | Vercel (front-end and API)      |
 
 ## Folder layout
 
@@ -28,6 +29,9 @@ client/                 the shop people see and click
 server/                 the back office
   src/index.js          API entry point
   .env                  secret keys - never shared, never committed
+mobile/                 Android and iPhone app
+  src/app/              Expo Router screens
+  .env                  public mobile settings, never committed
 docs/
   SETUP.md              how to create the Supabase, Google, Mailgun and Paystack accounts
   supabase-schema.sql   paste this into the Supabase SQL Editor to create the tables
@@ -51,6 +55,8 @@ npm run dev
 
 Then open `http://localhost:5173`.
 
+For the mobile app, follow `mobile/README.md`.
+
 ## First-time setup
 
 Follow `docs/SETUP.md`, then paste `docs/supabase-schema.sql` into Supabase.
@@ -65,8 +71,9 @@ After that, fill in `server/.env` and `client/.env`.
 - [x] Checkout page
 - [x] Google sign-in
 - [x] Secure order saving
-- [ ] Paystack payments
+- [x] Paystack payments
 - [x] Mailgun confirmation emails
 - [x] Customer order history
 - [x] Admin order management
 - [x] Admin product, delivery-fee and photo management
+- [x] Android and iPhone app implementation
