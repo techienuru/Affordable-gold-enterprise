@@ -850,6 +850,7 @@ function CheckoutPage() {
   const totalKobo = subtotalKobo + deliveryFeeKobo
   const customerName = user?.user_metadata?.full_name || user?.user_metadata?.name || ''
   const savingOrder = orderState === 'saving'
+  const submitLabel = paymentMethod === 'card' ? 'Place order and pay' : 'Place order'
   const deliveryUnavailable = fulfilment === 'delivery' && zoneState !== 'ready'
 
   const handleOrderSubmit = async (event) => {
